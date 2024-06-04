@@ -1,8 +1,13 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include <VescUart.h>
 
 /** Initiate VescUart class for two VESCs */
 VescUart VESC1;
 VescUart VESC2;
+
+/** Initialize the LCD with I2C address 0x27 and 20x4 dimensions */
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 void setup() {
   /** Setup Serial port to display data */
@@ -19,6 +24,13 @@ void setup() {
   /** Define which hardware serial ports to use as UART */
   VESC1.setSerialPort(&Serial1);
   VESC2.setSerialPort(&Serial2);
+
+  /** Initialize the LCD */
+  lcd.init();
+  lcd.backlight();
+  lcd.print("Setup complete.");
+  delay(2000);
+  lcd.clear();
 
   Serial.println("Setup complete. Enter two RPM values separated by a space to control the motors.");
 }
@@ -78,8 +90,18 @@ void loop() {
     Serial.println(VESC1.data.ampHours);
     Serial.print("VESC1 Tachometer: ");
     Serial.println(VESC1.data.tachometerAbs);
+
+    // Display data on LCD
+    lcd.setCursor(0, 0);
+    lcd.print("VESC1 RPM: ");
+    lcd.print(VESC1.data.rpm);
+    lcd.setCursor(0, 1);
+    lcd.print("VESC1 Voltage: ");
+    lcd.print(VESC1.data.inpVoltage);
   } else {
     Serial.println("Failed to get data from VESC1!");
+    lcd.setCursor(0, 0);
+    lcd.print("VESC1 Error");
   }
 
   /** Call the function getVescValues() to acquire data from VESC2 */
@@ -92,8 +114,18 @@ void loop() {
     Serial.println(VESC2.data.ampHours);
     Serial.print("VESC2 Tachometer: ");
     Serial.println(VESC2.data.tachometerAbs);
+
+    // Display data on LCD
+    lcd.setCursor(0, 2);
+    lcd.print("VESC2 RPM: ");
+    lcd.print(VESC2.data.rpm);
+    lcd.setCursor(0, 3);
+    lcd.print("VESC2 Voltage: ");
+    lcd.print(VESC2.data.inpVoltage);
   } else {
     Serial.println("Failed to get data from VESC2!");
+    lcd.setCursor(0, 2);
+    lcd.print("VESC2 Error");
   }
 
   delay(100);
