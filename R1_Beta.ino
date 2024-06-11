@@ -54,10 +54,10 @@ void ps2_setup() {
       break;
   }
 }
+//----------------------------------------------------------------------------------------------------------------------------//
 
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+
+
 
 
 
@@ -234,13 +234,8 @@ double pid_cal(int motor_id, double par_Setpoint, double par_PID_INPUT) {
     return BR_PID_Output;
   }
 }
-
-
-
-
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+
 
 
 
@@ -392,9 +387,99 @@ void move_motor(int joy_LX, int joy_LY, int joy_RX) {
 
 
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
 
+
+// ███████ ██   ██  ██████   ██████  ████████ ███████ ██████      ███████ ███████ ████████ ██    ██ ██████  
+// ██      ██   ██ ██    ██ ██    ██    ██    ██      ██   ██     ██      ██         ██    ██    ██ ██   ██ 
+// ███████ ███████ ██    ██ ██    ██    ██    █████   ██████      ███████ █████      ██    ██    ██ ██████  
+//      ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██          ██ ██         ██    ██    ██ ██      
+// ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██     ███████ ███████    ██     ██████  ██      
+
+// VESC Variables
+VescUart VESC1;
+VescUart VESC2;
+LiquidCrystal_I2C lcd(0x27, 20, 4); // Initialize the LCD with I2C address 0x27 and 20x4 dimensions
+
+// Mode Constants
+#define MOVING_MODE 0
+#define SHOOTING_MODE 1
+
+int currentMode = MOVING_MODE; // Initial mode is Moving Mode
+
+void shooter_setup() {
+  Serial1.begin(115200);
+  Serial2.begin(115200);
+  VESC1.setSerialPort(&Serial1);
+  VESC2.setSerialPort(&Serial2);
+
+// -----LCD Display-----
+  lcd.begin(20, 4); // Specify columns and rows
+  lcd.backlight();
+  lcd.print("Setup complete.");
+  delay(2000);
+  lcd.clear();
+}                                                                                                         
+
+
+
+// ███████ ██   ██  ██████   ██████  ████████ ███████ ██████      ██       ██████   ██████  ██████  
+// ██      ██   ██ ██    ██ ██    ██    ██    ██      ██   ██     ██      ██    ██ ██    ██ ██   ██ 
+// ███████ ███████ ██    ██ ██    ██    ██    █████   ██████      ██      ██    ██ ██    ██ ██████  
+//      ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██     ██      ██    ██ ██    ██ ██      
+// ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██     ███████  ██████   ██████  ██      
+
+void shooter_loop() {
+  static int lastInputValue1 = 0;
+  static int lastInputValue2 = 0;
+  ps2x.read_gamepad(false, vibrate);
+
+  if (ps2x.Button(PSB_GREEN)) {
+    lastInputValue1 = 3000;
+    lastInputValue2 = 3000;
+    Serial.println("Green button pressed: Setting RPM to 3000");
+  } else if (ps2x.Button(PSB_BLUE)) {
+    lastInputValue1 = -3000;
+    lastInputValue2 = -3000;
+    Serial.println("Blue button pressed: Setting RPM to -3000");
+  } else {
+    lastInputValue1 = 0;
+    lastInputValue2 = 0;
+    Serial.println("No button pressed: Stopping motors");
+  }
+
+  VESC1.setRPM(lastInputValue1);
+  VESC2.setRPM(lastInputValue2);
+
+  if (VESC1.getVescValues()) {
+    Serial.print("VESC1 RPM: "); Serial.println(VESC1.data.rpm);
+    Serial.print("VESC1 Input Voltage: "); Serial.println(VESC1.data.inpVoltage);
+    Serial.print("VESC1 Amp Hours: "); Serial.println(VESC1.data.ampHours);
+    Serial.print("VESC1 Tachometer: "); Serial.println(VESC1.data.tachometerAbs);
+    lcd.setCursor(0, 0); lcd.print("VESC1 RPM: "); lcd.print(VESC1.data.rpm);
+    lcd.setCursor(0, 1); lcd.print("VESC1 Voltage: "); lcd.print(VESC1.data.inpVoltage);
+  } else {
+    Serial.println("Failed to get data from VESC1!");
+    lcd.setCursor(0, 0); lcd.print("VESC1 Error");
+  }
+
+  if (VESC2.getVescValues()) {
+    Serial.print("VESC2 RPM: "); Serial.println(VESC2.data.rpm);
+    Serial.print("VESC2 Input Voltage: "); Serial.println(VESC2.data.inpVoltage);
+    Serial.print("VESC2 Amp Hours: "); Serial.println(VESC2.data.ampHours);
+    Serial.print("VESC2 Tachometer: "); Serial.println(VESC2.data.tachometerAbs);
+    lcd.setCursor(0, 2); lcd.print("VESC2 RPM: "); lcd.print(VESC2.data.rpm);
+    lcd.setCursor(0, 3); lcd.print("VESC2 Voltage: "); lcd.print(VESC2.data.inpVoltage);
+  } else {
+    Serial.println("Failed to get data from VESC2!");
+    lcd.setCursor(0, 2); lcd.print("VESC2 Error");
+  }
+
+  delay(100);
+}         
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
 
 
 // ██    ██  ██████  ██ ██████      ███████ ███████ ████████ ██    ██ ██████       ██     ██ 
@@ -403,16 +488,13 @@ void move_motor(int joy_LX, int joy_LY, int joy_RX) {
 //  ██  ██  ██    ██ ██ ██   ██          ██ ██         ██    ██    ██ ██          ██       ██ 
 //   ████    ██████  ██ ██████      ███████ ███████    ██     ██████  ██           ██     ██  
 void setup() {
-  shooter_setup();  // Setup shooter pinMode
-  while (!Serial) {
-    continue;  // Wait for serial connection to be established
-  }
-  Serial.begin(115200);  // Initialize serial communication
+  Serial.begin(115200);
+  while (!Serial) continue; // Wait for serial connection to be established
 
-  ps2_setup();          // Setup PS2 controller
-  can_mcp2515_setup();  // Setup MCP2515 CAN bus controller
-  pid_setup();          // Setup PID controllers
-  claw_setup();
+  ps2_setup();
+  can_mcp2515_setup();
+  pid_setup();
+  shooter_setup();
 }
 //---------------------------------------------------------------------------------------------------------------
 
@@ -424,10 +506,19 @@ void setup() {
 //  ██  ██  ██    ██ ██ ██   ██     ██      ██    ██ ██    ██ ██          ██       ██ 
 //   ████    ██████  ██ ██████      ███████  ██████   ██████  ██           ██     ██  
 void loop() {
-  ps2x.read_gamepad(false, 1);                                                // Read input from PS2 controller
-  move_motor(ps2x.Analog(PSS_LX), ps2x.Analog(PSS_LY), ps2x.Analog(PSS_RX));  // Move the motor based on joystick input
-  shooter_action();
-  ring_pusher_action();
-  claw_action();
-  delay(10);  // Small delay between iterations
-} 
+  ps2x.read_gamepad(false, 1);
+
+  if (ps2x.ButtonPressed(PSB_SELECT)) {
+    currentMode = (currentMode == MOVING_MODE) ? SHOOTING_MODE : MOVING_MODE;
+    Serial.print("Mode switched to: ");
+    Serial.println(currentMode == MOVING_MODE ? "Moving Mode" : "Shooting Mode");
+  }
+
+  if (currentMode == MOVING_MODE) {
+    move_motor(ps2x.Analog(PSS_LX), ps2x.Analog(PSS_LY), ps2x.Analog(PSS_RX));
+  } else if (currentMode == SHOOTING_MODE) {
+    shooter_loop();
+  }
+
+  delay(10);
+}
