@@ -18,6 +18,12 @@ PS2X ps2x;         // PS2X library instance for PS2 controller
 int error = 0;     // Variable to store PS2 controller initialization error
 byte vibrate = 0;  // Vibration control variable
 byte type = 0;     // Vibration ps2 controller type
+
+// Mode Constants
+#define MOVING_MODE 0
+#define SHOOTING_MODE 1
+
+int currentMode = MOVING_MODE; // Initial mode is Moving Mode
 //----------------------------------------------------------------------------------------------------------------------------------//
 // ██████  ███████ ██████      ███████ ███████ ████████     ██    ██ ██████ 
 // ██   ██ ██           ██     ██      ██         ██        ██    ██ ██   ██ 
@@ -387,6 +393,21 @@ void move_motor(int joy_LX, int joy_LY, int joy_RX) {
 
 
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+// ██████  ███████ ███████ ██ ███    ██ ███████     ███████ ██   ██  ██████   ██████  ████████ ███████ ██████  
+// ██   ██ ██      ██      ██ ████   ██ ██          ██      ██   ██ ██    ██ ██    ██    ██    ██      ██   ██ 
+// ██   ██ █████   █████   ██ ██ ██  ██ █████       ███████ ███████ ██    ██ ██    ██    ██    █████   ██████  
+// ██   ██ ██      ██      ██ ██  ██ ██ ██               ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██ 
+// ██████  ███████ ██      ██ ██   ████ ███████     ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██ 
+                                                                                                                                                                                                                   
+#include <LiquidCrystal_I2C.h>
+#include <VescUart.h>
+
+// VESC Variables
+VescUart VESC1;
+VescUart VESC2;
+
+LiquidCrystal_I2C lcd(0x27, 20, 4); // Initialize the LCD with I2C address 0x27 and 20x4 dimensions
+
 
 
 // ███████ ██   ██  ██████   ██████  ████████ ███████ ██████      ███████ ███████ ████████ ██    ██ ██████  
@@ -394,17 +415,6 @@ void move_motor(int joy_LX, int joy_LY, int joy_RX) {
 // ███████ ███████ ██    ██ ██    ██    ██    █████   ██████      ███████ █████      ██    ██    ██ ██████  
 //      ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██          ██ ██         ██    ██    ██ ██      
 // ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██     ███████ ███████    ██     ██████  ██      
-
-// VESC Variables
-VescUart VESC1;
-VescUart VESC2;
-LiquidCrystal_I2C lcd(0x27, 20, 4); // Initialize the LCD with I2C address 0x27 and 20x4 dimensions
-
-// Mode Constants
-#define MOVING_MODE 0
-#define SHOOTING_MODE 1
-
-int currentMode = MOVING_MODE; // Initial mode is Moving Mode
 
 void shooter_setup() {
   Serial1.begin(115200);
