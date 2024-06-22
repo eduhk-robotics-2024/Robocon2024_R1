@@ -1,222 +1,143 @@
-// ASCII ART Generated with: https://textkool.com/en/ascii-art-generator?hl=default&vl=default&font=ANSI%20Regular&text=Define%20Motor%20Pins
-//-------------------------------------------------Include Library-----------------------------------------------------------//
-
-
-// ██████  ███████ ███████ ██ ███    ██ ███████     ██████  ███████ ██████ 
-// ██   ██ ██      ██      ██ ████   ██ ██          ██   ██ ██           ██ 
-// ██   ██ █████   █████   ██ ██ ██  ██ █████       ██████  ███████  █████  
-// ██   ██ ██      ██      ██ ██  ██ ██ ██          ██           ██ ██     
-// ██████  ███████ ██      ██ ██   ████ ███████     ██      ███████ ███████ 
-//-------------------------------------------------Define PS2 Related Stuff-----------------------------------------------------------//
+#include <Servo.h>
 #include <PS2X_lib.h>
+#include <SPI.h>
+#include <mcp2515.h>
+#include <PID_v1.h>
+#include <LiquidCrystal_I2C.h>
+#include <VescUart.h>
+
+//-------------------------------------------------Servo Motor Control-----------------------------------------------------------//
+Servo motor;
+const int PWM_PIN = 6;
+
+//-------------------------------------------------Relay Control Pins------------------------------------------------------------//
+const int seedling_gripper_pin = 4;  // Seedling gripper relay
+const int seedling_gripper_lifter_pin = 3;  // Seedling gripper lifter relay
+
+//-------------------------------------------------PS2 Controller Related Stuff--------------------------------------------------//
 #define PS2_CLK 13  // PS2 Controller Clock pin
 #define PS2_DAT 12  // PS2 Controller Data pin
 #define PS2_CMD 11  // PS2 Controller Command pin
 #define PS2_SEL 10  // PS2 Controller Select pin
 
-PS2X ps2x;         // PS2X library instance for PS2 controller
-int error = 0;     // Variable to store PS2 controller initialization error
-byte vibrate = 0;  // Vibration control variable
-byte type = 0;     // Vibration ps2 controller type
+PS2X ps2x;
+int error = 0;
+byte vibrate = 0;
+byte type = 0;
 
 // Mode Constants
 #define MOVING_MODE 0
 #define SHOOTING_MODE 1
-
 int currentMode = MOVING_MODE; // Initial mode is Moving Mode
-//----------------------------------------------------------------------------------------------------------------------------------//
-// ██████  ███████ ██████      ███████ ███████ ████████     ██    ██ ██████ 
-// ██   ██ ██           ██     ██      ██         ██        ██    ██ ██   ██ 
-// ██████  ███████  █████      ███████ █████      ██        ██    ██ ██████  
-// ██           ██ ██               ██ ██         ██        ██    ██ ██     
-// ██      ███████ ███████     ███████ ███████    ██         ██████  ██ 
-//-------------------------------------------------Set Up PS2 Receiver-----------------------------------------------------------//
+
+//-------------------------------------------------CAN Bus Related Stuff---------------------------------------------------------//
+struct can_frame canMsgIn;
+struct can_frame canMsgOut;
+MCP2515 mcp2515(53);
+const int SPI_CS_PIN = 53;
+const int CAN_INT_PIN = 2;
+
+int motor_range = 100;
+int motors_speed[] = { 0, 0, 0, 0 };
+float speed_adjust = 0.2;
+
+//-------------------------------------------------PID Related Stuff-------------------------------------------------------------//
+double FL_Setpoint, FL_PID_Input, FL_PID_Output;
+double FR_Setpoint, FR_PID_Input, FR_PID_Output;
+double BL_Setpoint, BL_PID_Input, BL_PID_Output;
+double BR_Setpoint, BR_PID_Input, BR_PID_Output;
+double Kp = 130, Ki = 0, Kd = 1.5;
+
+PID FL_pid(&FL_PID_Input, &FL_PID_Output, &FL_Setpoint, Kp, Ki, Kd, DIRECT);
+PID FR_pid(&FR_PID_Input, &FR_PID_Output, &FR_Setpoint, Kp, Ki, Kd, REVERSE);
+PID BL_pid(&BL_PID_Input, &BL_PID_Output, &BL_Setpoint, Kp, Ki, Kd, DIRECT);
+PID BR_pid(&BR_PID_Input, &BR_PID_Output, &BR_Setpoint, Kp, Ki, Kd, REVERSE);
+
+//-------------------------------------------------VESC Related Stuff------------------------------------------------------------//
+VescUart VESC1;
+VescUart VESC2;
+LiquidCrystal_I2C lcd(0x27, 20, 4); // Initialize the LCD with I2C address 0x27 and 20x4 dimensions
+
+//-------------------------------------------------PS2 Setup Function------------------------------------------------------------//
 void ps2_setup() {
-  error = ps2x.config_gamepad(PS2_CLK, PS2_CMD, PS2_SEL, PS2_DAT, true, true);  //GamePad(clock(CLK), command(CMD), attention(CS), data(DAT), Pressures?, Rumble?)
-
+  error = ps2x.config_gamepad(PS2_CLK, PS2_CMD, PS2_SEL, PS2_DAT, true, true);
   if (error == 0) {
-    Serial.println("Found Controller, configured successful");
+    Serial.println("Found Controller, configured successfully");
+  } else {
+    Serial.print("PS2 Controller Error: ");
+    Serial.println(error);
   }
-
-  else if (error == 1)
-    Serial.println("No controller found, check wiring, see readme.txt to enable debug. visit www.billporter.info for troubleshooting tips");
-
-  else if (error == 2)
-    Serial.println("Controller found but not accepting commands. see readme.txt to enable debug. Visit www.billporter.info for troubleshooting tips");
-
-  else if (error == 3)
-    Serial.println("Controller refusing to enter Pressures mode, may not support it. ");
-
   type = ps2x.readType();
   switch (type) {
-    case 0:
-      Serial.println("Unknown Controller type");
-      break;
-    case 1:
-      Serial.println("DualShock Controller Found");
-      break;
-    case 2:
-      Serial.println("GuitarHero Controller Found");
-      break;
+    case 0: Serial.println("Unknown Controller type"); break;
+    case 1: Serial.println("DualShock Controller Found"); break;
+    case 2: Serial.println("GuitarHero Controller Found"); break;
   }
 }
-//----------------------------------------------------------------------------------------------------------------------------//
 
-
-
-
-
-
-
-
-
-// ██████  ███████ ███████ ██ ███    ██ ███████      ██████  █████  ███    ██     ██████  ██    ██ ███████ 
-// ██   ██ ██      ██      ██ ████   ██ ██          ██      ██   ██ ████   ██     ██   ██ ██    ██ ██      
-// ██   ██ █████   █████   ██ ██ ██  ██ █████       ██      ███████ ██ ██  ██     ██████  ██    ██ ███████ 
-// ██   ██ ██      ██      ██ ██  ██ ██ ██          ██      ██   ██ ██  ██ ██     ██   ██ ██    ██      ██ 
-// ██████  ███████ ██      ██ ██   ████ ███████      ██████ ██   ██ ██   ████     ██████   ██████  ███████ 
-//-------------------------------------------------Define Can Bus Related Stuff-----------------------------------------------------------//
-#include <SPI.h>
-#include <mcp2515.h>
-struct can_frame canMsgIn;            // CAN frame for incoming messages
-struct can_frame canMsgOut;           // CAN frame for outgoing messages
-MCP2515 mcp2515(53);                  // MCP2515 CAN bus controller instance
-const int SPI_CS_PIN = 53;  // Chip Select pin for MCP2515
-const int CAN_INT_PIN = 2;  // Interrupt pin for MCP2515
-int FL_motor_power = 0;               // Motor power for front left
-int FR_motor_power = 0;               // Motor power for front right
-int BL_motor_power = 0;               // Motor power for back left
-int BR_motor_power = 0;               // Motor power for back right
-int motor_range = 100;                // Range of motor power
-int motors_speed[] = { 0, 0, 0, 0 };  // Array to store motor speeds
-int print_delay = 0;                  // Delay for serial printing
-float speed_adjust = 0.2;
-//---------------------------------------------------------------------------------------------------------------------------------------//
-// ███    ███  ██████ ██████  ██████  ███████  ██ ███████     ███    ███  ██████  ██████  ██    ██ ██      ███████     ███████ ███████ ████████     ██    ██ ██████ 
-// ████  ████ ██      ██   ██      ██ ██      ███ ██          ████  ████ ██    ██ ██   ██ ██    ██ ██      ██          ██      ██         ██        ██    ██ ██   ██ 
-// ██ ████ ██ ██      ██████   █████  ███████  ██ ███████     ██ ████ ██ ██    ██ ██   ██ ██    ██ ██      █████       ███████ █████      ██        ██    ██ ██████  
-// ██  ██  ██ ██      ██      ██           ██  ██      ██     ██  ██  ██ ██    ██ ██   ██ ██    ██ ██      ██               ██ ██         ██        ██    ██ ██     
-// ██      ██  ██████ ██      ███████ ███████  ██ ███████     ██      ██  ██████  ██████   ██████  ███████ ███████     ███████ ███████    ██         ██████  ██ 
-//-------------------------------------------------Set Up MCP2515 Module-----------------------------------------------------------//
+//-------------------------------------------------CAN Bus Setup Function--------------------------------------------------------//
 void can_mcp2515_setup() {
-  mcp2515.reset();                             // Reset MCP2515 controller
-  mcp2515.setBitrate(CAN_1000KBPS, MCP_8MHZ);  // Set CAN bus bitrate and clock frequency
-  mcp2515.setNormalMode();                     // Set MCP2515 to normal mode
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_1000KBPS, MCP_8MHZ);
+  mcp2515.setNormalMode();
 }
-//--------------------------------------------------------------------------------------------------------------------------------//
-//  ██████  █████  ███    ██         ██     ██ ██████  ██ ████████ ███████  ██     ██ 
-// ██      ██   ██ ████   ██         ██     ██ ██   ██ ██    ██    ██      ██       ██ 
-// ██      ███████ ██ ██  ██         ██  █  ██ ██████  ██    ██    █████   ██       ██ 
-// ██      ██   ██ ██  ██ ██         ██ ███ ██ ██   ██ ██    ██    ██      ██       ██ 
-//  ██████ ██   ██ ██   ████ ███████  ███ ███  ██   ██ ██    ██    ███████  ██     ██  
-//-------------------------------------------------Write the Motor Power to a Specfic Motor through Can_bus Using MCP2515 Module-----------------------------------------------------------//
+
+//-------------------------------------------------PID Setup Function------------------------------------------------------------//
+void pid_setup() {
+  int pid_limit = 4096;
+  FL_pid.SetMode(AUTOMATIC);
+  FL_pid.SetOutputLimits(-pid_limit, pid_limit);
+  FR_pid.SetMode(AUTOMATIC);
+  FR_pid.SetOutputLimits(-pid_limit, pid_limit);
+  BL_pid.SetMode(AUTOMATIC);
+  BL_pid.SetOutputLimits(-pid_limit, pid_limit);
+  BR_pid.SetMode(AUTOMATIC);
+  BR_pid.SetOutputLimits(-pid_limit, pid_limit);
+}
+
+//-------------------------------------------------VESC Setup Function-----------------------------------------------------------//
+void shooter_setup() {
+  Serial1.begin(115200);
+  Serial2.begin(115200);
+  VESC1.setSerialPort(&Serial1);
+  VESC2.setSerialPort(&Serial2);
+
+  lcd.begin(20, 4);
+  lcd.backlight();
+  lcd.print("Setup complete.");
+  delay(2000);
+  lcd.clear();
+}
+
+//-------------------------------------------------CAN Write Function------------------------------------------------------------//
 void can_write(String motor, int power) {
   int motor_write_address = 0;
 
-  // Determine motor write address based on the motor name
-  if (motor == "FL") {
-    motor_write_address = 0;
-  } else if (motor == "FR") {
-    motor_write_address = 2;
-  } else if (motor == "BL") {
-    motor_write_address = 4;
-  } else if (motor == "BR") {
-    motor_write_address = 6;
-  }
+  if (motor == "FL") motor_write_address = 0;
+  else if (motor == "FR") motor_write_address = 2;
+  else if (motor == "BL") motor_write_address = 4;
+  else if (motor == "BR") motor_write_address = 6;
 
-  canMsgOut.can_id = 0x200;  // Set CAN message ID
-  canMsgOut.can_dlc = 8;     // Set CAN message length
-
-  // Set motor power values in the CAN message data
+  canMsgOut.can_id = 0x200;
+  canMsgOut.can_dlc = 8;
   canMsgOut.data[motor_write_address] = (power >> 8) & 0xFF;
   canMsgOut.data[motor_write_address + 1] = power & 0xFF;
 
-  mcp2515.sendMessage(&canMsgOut);  // Send CAN message
+  mcp2515.sendMessage(&canMsgOut);
 }
-//-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//  ██████  █████  ███    ██         ██████  ███████  █████  ██████          ███████ ██████  ███████ ███████ ██████   ██     ██ 
-// ██      ██   ██ ████   ██         ██   ██ ██      ██   ██ ██   ██         ██      ██   ██ ██      ██      ██   ██ ██       ██ 
-// ██      ███████ ██ ██  ██         ██████  █████   ███████ ██   ██         ███████ ██████  █████   █████   ██   ██ ██       ██ 
-// ██      ██   ██ ██  ██ ██         ██   ██ ██      ██   ██ ██   ██              ██ ██      ██      ██      ██   ██ ██       ██ 
-//  ██████ ██   ██ ██   ████ ███████ ██   ██ ███████ ██   ██ ██████  ███████ ███████ ██      ███████ ███████ ██████   ██     ██  
-//-------------------------------------------------Read All Motors Current Speed through Can_bus Using MCP2515 Module-----------------------------------------------------------//
+
+//-------------------------------------------------CAN Read Speed Function-------------------------------------------------------//
 void can_read_speed() {
   int single_motor_speed = 0;
-
   if (mcp2515.readMessage(&canMsgIn) == MCP2515::ERROR_OK) {
-    // Read speed from CAN message and map it to the motor speed range
-    if (canMsgIn.can_id == 0x201) {
-      single_motor_speed = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
-      if (single_motor_speed < -175) single_motor_speed += 175;
-      motors_speed[0] = single_motor_speed;
-    }
-    if (canMsgIn.can_id == 0x202) {
-      single_motor_speed = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
-      if (single_motor_speed < -175) single_motor_speed += 175;
-      motors_speed[1] = single_motor_speed;
-    }
-    if (canMsgIn.can_id == 0x203) {
-      single_motor_speed = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
-      if (single_motor_speed < -175) single_motor_speed += 175;
-      motors_speed[2] = single_motor_speed;
-    }
-    if (canMsgIn.can_id == 0x204) {
-      single_motor_speed = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
-      if (single_motor_speed < -175) single_motor_speed += 175;
-      motors_speed[3] = single_motor_speed;
-    }
+    if (canMsgIn.can_id == 0x201) motors_speed[0] = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
+    if (canMsgIn.can_id == 0x202) motors_speed[1] = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
+    if (canMsgIn.can_id == 0x203) motors_speed[2] = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
+    if (canMsgIn.can_id == 0x204) motors_speed[3] = (canMsgIn.data[2] << 8) + canMsgIn.data[3];
   }
 }
-//----------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
 
-
-
-
-
-
-
-
-// ██████  ███████ ███████ ██ ███    ██ ███████     ██████  ██ ██████ 
-// ██   ██ ██      ██      ██ ████   ██ ██          ██   ██ ██ ██   ██ 
-// ██   ██ █████   █████   ██ ██ ██  ██ █████       ██████  ██ ██   ██ 
-// ██   ██ ██      ██      ██ ██  ██ ██ ██          ██      ██ ██   ██ 
-// ██████  ███████ ██      ██ ██   ████ ███████     ██      ██ ██████  
-//-------------------------------------------------Define PID Related Stuff-----------------------------------------------------------//
-#include <PID_v1.h>
-double FL_Setpoint, FL_PID_Input, FL_PID_Output;                               // Variables for front left motor PID control
-double FR_Setpoint, FR_PID_Input, FR_PID_Output;                               // Variables for front right motor PID control
-double BL_Setpoint, BL_PID_Input, BL_PID_Output;                               // Variables for back left motor PID control
-double BR_Setpoint, BR_PID_Input, BR_PID_Output;                               // Variables for back right motor PID control
-double Kp = 100, Ki = 0, Kd = 4;                                               // PID tuning parameters
-PID FL_pid(&FL_PID_Input, &FL_PID_Output, &FL_Setpoint, Kp, Ki, Kd, DIRECT);   // PID controller for front left motor
-PID FR_pid(&FR_PID_Input, &FR_PID_Output, &FR_Setpoint, Kp, Ki, Kd, REVERSE);  // PID controller for front right motor
-PID BL_pid(&BL_PID_Input, &BL_PID_Output, &BL_Setpoint, Kp, Ki, Kd, DIRECT);   // PID controller for back left motor
-PID BR_pid(&BR_PID_Input, &BR_PID_Output, &BR_Setpoint, Kp, Ki, Kd, REVERSE);  // PID controller for back right motor
-//-----------------------------------------------------------------------------------------------------------------------------------//
-// ██████  ██ ██████      ███████ ███████ ████████     ██    ██ ██████ 
-// ██   ██ ██ ██   ██     ██      ██         ██        ██    ██ ██   ██ 
-// ██████  ██ ██   ██     ███████ █████      ██        ██    ██ ██████  
-// ██      ██ ██   ██          ██ ██         ██        ██    ██ ██     
-// ██      ██ ██████      ███████ ███████    ██         ██████  ██ 
-//-------------------------------------------------Set Up PIDs Mode and OutputLimits-----------------------------------------------------------//
-void pid_setup() {
-  int pid_limit = 4096;
-  FL_pid.SetMode(AUTOMATIC);                      // Set PID to automatic mode for front left motor
-  FL_pid.SetOutputLimits(-pid_limit, pid_limit);  // Set output limits for front left motor
-  FR_pid.SetMode(AUTOMATIC);                      // Set PID to automatic mode for front right motor
-  FR_pid.SetOutputLimits(-pid_limit, pid_limit);  // Set output limits for front right motor
-  BL_pid.SetMode(AUTOMATIC);                      // Set PID to automatic mode for back left motor
-  BL_pid.SetOutputLimits(-pid_limit, pid_limit);  // Set output limits for back left motor
-  BR_pid.SetMode(AUTOMATIC);                      // Set PID to automatic mode for back right motor
-  BR_pid.SetOutputLimits(-pid_limit, pid_limit);  // Set output limits for back right motor
-}
-//--------------------------------------------------------------------------------------------------------------------------------------------//
-// ██████  ██ ██████           ██████  █████  ██       ██     ██ 
-// ██   ██ ██ ██   ██         ██      ██   ██ ██      ██       ██ 
-// ██████  ██ ██   ██         ██      ███████ ██      ██       ██ 
-// ██      ██ ██   ██         ██      ██   ██ ██      ██       ██ 
-// ██      ██ ██████  ███████  ██████ ██   ██ ███████  ██     ██  
-//-------------------------------------------------Calculate the Needed Power a Specific Motor Need with PID Algorithum-----------------------------------------------------------//
+//-------------------------------------------------PID Calculation Function------------------------------------------------------//
 double pid_cal(int motor_id, double par_Setpoint, double par_PID_INPUT) {
   if (motor_id == 1) {
     FL_Setpoint = par_Setpoint;
@@ -239,218 +160,70 @@ double pid_cal(int motor_id, double par_Setpoint, double par_PID_INPUT) {
     BR_pid.Compute();
     return BR_PID_Output;
   }
+  return 0;
 }
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
 
-
-
-
-
-
-// ███    ███  ██████  ██    ██ ███████         ███    ███  ██████  ████████  ██████  ██████   ██     ██ 
-// ████  ████ ██    ██ ██    ██ ██              ████  ████ ██    ██    ██    ██    ██ ██   ██ ██       ██ 
-// ██ ████ ██ ██    ██ ██    ██ █████           ██ ████ ██ ██    ██    ██    ██    ██ ██████  ██       ██ 
-// ██  ██  ██ ██    ██  ██  ██  ██              ██  ██  ██ ██    ██    ██    ██    ██ ██   ██ ██       ██ 
-// ██      ██  ██████    ████   ███████ ███████ ██      ██  ██████     ██     ██████  ██   ██  ██     ██  
-//-------------------------------------------------Move the 4 Motor of a Mecanum Wheel Design-----------------------------------------------------------//
+//-------------------------------------------------Move Motor Function-----------------------------------------------------------//
 void move_motor(int joy_LX, int joy_LY, int joy_RX) {
-  // ███████ ████████ ███████ ██████       ██     ███    ███ ███████  ██████  █████  ███    ██ ██    ██ ███    ███      █████  ██       ██████   ██████  ██████  ██ ████████ ██   ██ ███    ███ 
-  // ██         ██    ██      ██   ██     ███     ████  ████ ██      ██      ██   ██ ████   ██ ██    ██ ████  ████     ██   ██ ██      ██       ██    ██ ██   ██ ██    ██    ██   ██ ████  ████ 
-  // ███████    ██    █████   ██████       ██     ██ ████ ██ █████   ██      ███████ ██ ██  ██ ██    ██ ██ ████ ██     ███████ ██      ██   ███ ██    ██ ██████  ██    ██    ███████ ██ ████ ██ 
-  //      ██    ██    ██      ██           ██     ██  ██  ██ ██      ██      ██   ██ ██  ██ ██ ██    ██ ██  ██  ██     ██   ██ ██      ██    ██ ██    ██ ██   ██ ██    ██    ██   ██ ██  ██  ██ 
-  // ███████    ██    ███████ ██           ██     ██      ██ ███████  ██████ ██   ██ ██   ████  ██████  ██      ██     ██   ██ ███████  ██████   ██████  ██   ██ ██    ██    ██   ██ ██      ██ 
-  //Step 1: Mecanum algorithm for motion control
   int joy_deadzone = 10;
   int speed_deadzone = 2;
   int forward = map(joy_LY, 0, 255, motor_range, -motor_range);
   int sideway = map(joy_LX, 0, 255, -motor_range, motor_range);
-  int turn = map(joy_RX, 0, 255, motor_range, -motor_range)*0.75;
+  int turn = map(joy_RX, 0, 255, motor_range, -motor_range) * 0.75;
 
-  // Apply deadzones to joystick values
-  if (forward <= joy_deadzone && forward >= -joy_deadzone) {
-    forward = 0;
-  }
-  if (sideway <= joy_deadzone && sideway >= -joy_deadzone) {
-    sideway = 0;
-  }
-  if (turn <= joy_deadzone && turn >= -joy_deadzone) {
-    turn = 0;
-  }
-  // Calculate motor speeds based on joystick input
+  if (abs(forward) <= joy_deadzone) forward = 0;
+  if (abs(sideway) <= joy_deadzone) sideway = 0;
+  if (abs(turn) <= joy_deadzone) turn = 0;
+
   int FL_speed = constrain((forward + sideway - turn), -motor_range, motor_range);
   int FR_speed = constrain((forward - sideway + turn), -motor_range, motor_range);
   int BL_speed = constrain((forward - sideway - turn), -motor_range, motor_range);
   int BR_speed = constrain((forward + sideway + turn), -motor_range, motor_range);
 
-  if (ps2x.ButtonPressed(PSB_L1) && speed_adjust > 0.1) {
-    speed_adjust -= 0.2;
-  }
-  if (ps2x.ButtonPressed(PSB_R1) && speed_adjust < 1) {
-    speed_adjust += 0.2;
-  }
+  if (ps2x.ButtonPressed(PSB_L1) && speed_adjust > 0.1) speed_adjust -= 0.2;
+  if (ps2x.ButtonPressed(PSB_R1) && speed_adjust < 1) speed_adjust += 0.2;
 
   FL_speed *= speed_adjust;
   FR_speed *= speed_adjust;
   BL_speed *= speed_adjust;
   BR_speed *= speed_adjust;
-  // analogWrite(wheel_speed_led_pin, int(128 * speed_adjust));
 
-  // Apply deadzones to motor speeds
-  if (FL_speed <= speed_deadzone && FL_speed >= -speed_deadzone) {
-    FL_speed = 0;
-  }
-  if (FR_speed <= speed_deadzone && FR_speed >= -speed_deadzone) {
-    FR_speed = 0;
-  }
-  if (BL_speed <= speed_deadzone && BL_speed >= -speed_deadzone) {
-    BL_speed = 0;
-  }
-  if (BR_speed <= speed_deadzone && BR_speed >= -speed_deadzone) {
-    BR_speed = 0;
-  }
+  if (abs(FL_speed) <= speed_deadzone) FL_speed = 0;
+  if (abs(FR_speed) <= speed_deadzone) FR_speed = 0;
+  if (abs(BL_speed) <= speed_deadzone) BL_speed = 0;
+  if (abs(BR_speed) <= speed_deadzone) BR_speed = 0;
 
-  // ███████ ████████ ███████ ██████      ██████      ██████  ███████  █████  ██████       ██████ ██    ██ ██████  ██████  ███████ ███    ██ ████████     ███    ███  ██████  ████████  ██████  ██████      ███████ ██████  ███████ ███████ ██████  ███████ 
-  // ██         ██    ██      ██   ██          ██     ██   ██ ██      ██   ██ ██   ██     ██      ██    ██ ██   ██ ██   ██ ██      ████   ██    ██        ████  ████ ██    ██    ██    ██    ██ ██   ██     ██      ██   ██ ██      ██      ██   ██ ██      
-  // ███████    ██    █████   ██████       █████      ██████  █████   ███████ ██   ██     ██      ██    ██ ██████  ██████  █████   ██ ██  ██    ██        ██ ████ ██ ██    ██    ██    ██    ██ ██████      ███████ ██████  █████   █████   ██   ██ ███████ 
-  //      ██    ██    ██      ██          ██          ██   ██ ██      ██   ██ ██   ██     ██      ██    ██ ██   ██ ██   ██ ██      ██  ██ ██    ██        ██  ██  ██ ██    ██    ██    ██    ██ ██   ██          ██ ██      ██      ██      ██   ██      ██ 
-  // ███████    ██    ███████ ██          ███████     ██   ██ ███████ ██   ██ ██████       ██████  ██████  ██   ██ ██   ██ ███████ ██   ████    ██        ██      ██  ██████     ██     ██████  ██   ██     ███████ ██      ███████ ███████ ██████  ███████ 
-  // Step 2: Read current motor speeds
   can_read_speed();
   int FL_current_speed = map(motors_speed[0], -10000, 10000, -motor_range, motor_range);
   int FR_current_speed = map(motors_speed[1], -10000, 10000, -motor_range, motor_range);
   int BL_current_speed = map(motors_speed[2], -10000, 10000, -motor_range, motor_range);
   int BR_current_speed = map(motors_speed[3], -10000, 10000, -motor_range, motor_range);
 
-
-  // ███████ ████████ ███████ ██████      ██████      ██████  ███████ ██████  ███████  ██████  ██████  ███    ███     ██████  ██ ██████       ██████  ██████  ███    ██ ████████ ██████   ██████  ██          ███████  ██████  ██████      ███████  █████   ██████ ██   ██     ███    ███  ██████  ████████  ██████  ██████ 
-  // ██         ██    ██      ██   ██          ██     ██   ██ ██      ██   ██ ██      ██    ██ ██   ██ ████  ████     ██   ██ ██ ██   ██     ██      ██    ██ ████   ██    ██    ██   ██ ██    ██ ██          ██      ██    ██ ██   ██     ██      ██   ██ ██      ██   ██     ████  ████ ██    ██    ██    ██    ██ ██   ██ 
-  // ███████    ██    █████   ██████       █████      ██████  █████   ██████  █████   ██    ██ ██████  ██ ████ ██     ██████  ██ ██   ██     ██      ██    ██ ██ ██  ██    ██    ██████  ██    ██ ██          █████   ██    ██ ██████      █████   ███████ ██      ███████     ██ ████ ██ ██    ██    ██    ██    ██ ██████  
-  //      ██    ██    ██      ██               ██     ██      ██      ██   ██ ██      ██    ██ ██   ██ ██  ██  ██     ██      ██ ██   ██     ██      ██    ██ ██  ██ ██    ██    ██   ██ ██    ██ ██          ██      ██    ██ ██   ██     ██      ██   ██ ██      ██   ██     ██  ██  ██ ██    ██    ██    ██    ██ ██   ██ 
-  // ███████    ██    ███████ ██          ██████      ██      ███████ ██   ██ ██       ██████  ██   ██ ██      ██     ██      ██ ██████       ██████  ██████  ██   ████    ██    ██   ██  ██████  ███████     ██       ██████  ██   ██     ███████ ██   ██  ██████ ██   ██     ██      ██  ██████     ██     ██████  ██   ██ 
-  // Step 3: Perform PID control for each motor
   double FL_Power = pid_cal(1, FL_speed, FL_current_speed);
   double FR_Power = pid_cal(2, FR_speed, -FR_current_speed);
   double BL_Power = pid_cal(3, BL_speed, BL_current_speed);
   double BR_Power = pid_cal(4, BR_speed, -BR_current_speed);
 
-  // Print motor speeds, desired speeds, and calculated powers for debugging
-  print_delay += 1;
-  if (print_delay == 10) {
-    Serial.print("\nSpeed level: ");
-    Serial.print(int(speed_adjust * 10));
-    Serial.print("\nFL_current_speed(mapped): ");
-    Serial.print(FL_current_speed);
-    Serial.print("    FL_current_speed(unmapped): ");
-    Serial.print(motors_speed[0]);
-    Serial.print("    FL_speed: ");
-    Serial.print(FL_speed);
-    Serial.print("    FL_Power: ");
-    Serial.print(FL_Power);
-
-    Serial.print("\nFR_current_speed(mapped): ");
-    Serial.print(FR_current_speed);
-    Serial.print("    FR_current_speed(unmapped): ");
-    Serial.print(motors_speed[1]);
-    Serial.print("    FR_speed: ");
-    Serial.print(FR_speed);
-    Serial.print("    FR_Power: ");
-    Serial.print(FR_Power);
-
-    Serial.print("\nBL_current_speed(mapped): ");
-    Serial.print(BL_current_speed);
-    Serial.print("    BL_current_speed(unmapped): ");
-    Serial.print(motors_speed[2]);
-    Serial.print("    BL_speed: ");
-    Serial.print(BL_speed);
-    Serial.print("    BL_Power: ");
-    Serial.print(BL_Power);
-
-    Serial.print("\nBR_current_speed(mapped): ");
-    Serial.print(BR_current_speed);
-    Serial.print("    BR_current_speed(unmapped): ");
-    Serial.print(motors_speed[3]);
-    Serial.print("    BR_speed: ");
-    Serial.print(BR_speed);
-    Serial.print("    BR_Power: ");
-    Serial.print(BR_Power);
-
-    Serial.print("\n\n");
-    print_delay = 0;
-  }
-
-
-  // ███████ ████████ ███████ ██████      ██   ██     ██     ██ ██████  ██ ████████ ███████     ███    ███  ██████  ████████  ██████  ██████      ██████   ██████  ██     ██ ███████ ██████  ███████     ████████  ██████      ████████ ██   ██ ███████      ██████  █████  ███    ██     ██████  ██    ██ ███████ 
-  // ██         ██    ██      ██   ██     ██   ██     ██     ██ ██   ██ ██    ██    ██          ████  ████ ██    ██    ██    ██    ██ ██   ██     ██   ██ ██    ██ ██     ██ ██      ██   ██ ██             ██    ██    ██        ██    ██   ██ ██          ██      ██   ██ ████   ██     ██   ██ ██    ██ ██      
-  // ███████    ██    █████   ██████      ███████     ██  █  ██ ██████  ██    ██    █████       ██ ████ ██ ██    ██    ██    ██    ██ ██████      ██████  ██    ██ ██  █  ██ █████   ██████  ███████        ██    ██    ██        ██    ███████ █████       ██      ███████ ██ ██  ██     ██████  ██    ██ ███████ 
-  //      ██    ██    ██      ██               ██     ██ ███ ██ ██   ██ ██    ██    ██          ██  ██  ██ ██    ██    ██    ██    ██ ██   ██     ██      ██    ██ ██ ███ ██ ██      ██   ██      ██        ██    ██    ██        ██    ██   ██ ██          ██      ██   ██ ██  ██ ██     ██   ██ ██    ██      ██ 
-  // ███████    ██    ███████ ██               ██      ███ ███  ██   ██ ██    ██    ███████     ██      ██  ██████     ██     ██████  ██   ██     ██       ██████   ███ ███  ███████ ██   ██ ███████        ██     ██████         ██    ██   ██ ███████      ██████ ██   ██ ██   ████     ██████   ██████  ███████ 
-  // Step 4: Write motor powers to the CAN bus
   can_write("FL", int(FL_Power));
   can_write("FR", int(FR_Power));
   can_write("BL", int(BL_Power));
   can_write("BR", int(BR_Power));
 }
 
-
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-// ██████  ███████ ███████ ██ ███    ██ ███████     ███████ ██   ██  ██████   ██████  ████████ ███████ ██████  
-// ██   ██ ██      ██      ██ ████   ██ ██          ██      ██   ██ ██    ██ ██    ██    ██    ██      ██   ██ 
-// ██   ██ █████   █████   ██ ██ ██  ██ █████       ███████ ███████ ██    ██ ██    ██    ██    █████   ██████  
-// ██   ██ ██      ██      ██ ██  ██ ██ ██               ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██ 
-// ██████  ███████ ██      ██ ██   ████ ███████     ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██ 
-                                                                                                                                                                                                                   
-#include <LiquidCrystal_I2C.h>
-#include <VescUart.h>
-
-// VESC Variables
-VescUart VESC1;
-VescUart VESC2;
-
-LiquidCrystal_I2C lcd(0x27, 20, 4); // Initialize the LCD with I2C address 0x27 and 20x4 dimensions
-
-
-
-// ███████ ██   ██  ██████   ██████  ████████ ███████ ██████      ███████ ███████ ████████ ██    ██ ██████  
-// ██      ██   ██ ██    ██ ██    ██    ██    ██      ██   ██     ██      ██         ██    ██    ██ ██   ██ 
-// ███████ ███████ ██    ██ ██    ██    ██    █████   ██████      ███████ █████      ██    ██    ██ ██████  
-//      ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██          ██ ██         ██    ██    ██ ██      
-// ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██     ███████ ███████    ██     ██████  ██      
-
-void shooter_setup() {
-  Serial1.begin(115200);
-  Serial2.begin(115200);
-  VESC1.setSerialPort(&Serial1);
-  VESC2.setSerialPort(&Serial2);
-
-// -----LCD Display-----
-  lcd.begin(20, 4); // Specify columns and rows
-  lcd.backlight();
-  lcd.print("Setup complete.");
-  delay(2000);
-  lcd.clear();
-}                                                                                                         
-
-
-
-// ███████ ██   ██  ██████   ██████  ████████ ███████ ██████      ██       ██████   ██████  ██████  
-// ██      ██   ██ ██    ██ ██    ██    ██    ██      ██   ██     ██      ██    ██ ██    ██ ██   ██ 
-// ███████ ███████ ██    ██ ██    ██    ██    █████   ██████      ██      ██    ██ ██    ██ ██████  
-//      ██ ██   ██ ██    ██ ██    ██    ██    ██      ██   ██     ██      ██    ██ ██    ██ ██      
-// ███████ ██   ██  ██████   ██████     ██    ███████ ██   ██     ███████  ██████   ██████  ██      
-
+//-------------------------------------------------Shooter Loop Function---------------------------------------------------------//
 void shooter_loop() {
   static int lastInputValue1 = 0;
   static int lastInputValue2 = 0;
   ps2x.read_gamepad(false, vibrate);
 
   if (ps2x.Button(PSB_GREEN)) {
-    lastInputValue1 = 3000;
-    lastInputValue2 = 3000;
-    Serial.println("Green button pressed: Setting RPM to 3000");
+    lastInputValue1 = 10000;
+    lastInputValue2 = 10000;
+    Serial.println("Green button pressed: Setting RPM to 10000");
   } else if (ps2x.Button(PSB_BLUE)) {
-    lastInputValue1 = -3000;
-    lastInputValue2 = -3000;
-    Serial.println("Blue button pressed: Setting RPM to -3000");
+    lastInputValue1 = -10000;
+    lastInputValue2 = -10000;
+    Serial.println("Blue button pressed: Setting RPM to -10000");
   } else {
     lastInputValue1 = 0;
     lastInputValue2 = 0;
@@ -461,42 +234,36 @@ void shooter_loop() {
   VESC2.setRPM(lastInputValue2);
 
   if (VESC1.getVescValues()) {
-    Serial.print("VESC1 RPM: "); Serial.println(VESC1.data.rpm);
-    Serial.print("VESC1 Input Voltage: "); Serial.println(VESC1.data.inpVoltage);
-    Serial.print("VESC1 Amp Hours: "); Serial.println(VESC1.data.ampHours);
-    Serial.print("VESC1 Tachometer: "); Serial.println(VESC1.data.tachometerAbs);
     lcd.setCursor(0, 0); lcd.print("VESC1 RPM: "); lcd.print(VESC1.data.rpm);
     lcd.setCursor(0, 1); lcd.print("VESC1 Voltage: "); lcd.print(VESC1.data.inpVoltage);
   } else {
-    Serial.println("Failed to get data from VESC1!");
     lcd.setCursor(0, 0); lcd.print("VESC1 Error");
   }
 
   if (VESC2.getVescValues()) {
-    Serial.print("VESC2 RPM: "); Serial.println(VESC2.data.rpm);
-    Serial.print("VESC2 Input Voltage: "); Serial.println(VESC2.data.inpVoltage);
-    Serial.print("VESC2 Amp Hours: "); Serial.println(VESC2.data.ampHours);
-    Serial.print("VESC2 Tachometer: "); Serial.println(VESC2.data.tachometerAbs);
     lcd.setCursor(0, 2); lcd.print("VESC2 RPM: "); lcd.print(VESC2.data.rpm);
     lcd.setCursor(0, 3); lcd.print("VESC2 Voltage: "); lcd.print(VESC2.data.inpVoltage);
   } else {
-    Serial.println("Failed to get data from VESC2!");
     lcd.setCursor(0, 2); lcd.print("VESC2 Error");
   }
 
   delay(100);
-}         
+}
 
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+//-------------------------------------------------Relay Control Function--------------------------------------------------------//
+void controlRelays() {
+  if (ps2x.ButtonPressed(PSB_GREEN)) { // Green button to toggle seedling gripper relay
+    digitalWrite(seedling_gripper_pin, !digitalRead(seedling_gripper_pin));
+    delay(100); // Debounce delay
+  }
 
+  if (ps2x.ButtonPressed(PSB_RED)) { // Red button to toggle seedling gripper lifter relay
+    digitalWrite(seedling_gripper_lifter_pin, !digitalRead(seedling_gripper_lifter_pin));
+    delay(100); // Debounce delay
+  }
+}
 
-// ██    ██  ██████  ██ ██████      ███████ ███████ ████████ ██    ██ ██████       ██     ██ 
-// ██    ██ ██    ██ ██ ██   ██     ██      ██         ██    ██    ██ ██   ██     ██       ██ 
-// ██    ██ ██    ██ ██ ██   ██     ███████ █████      ██    ██    ██ ██████      ██       ██ 
-//  ██  ██  ██    ██ ██ ██   ██          ██ ██         ██    ██    ██ ██          ██       ██ 
-//   ████    ██████  ██ ██████      ███████ ███████    ██     ██████  ██           ██     ██  
+//-------------------------------------------------Setup Function---------------------------------------------------------------//
 void setup() {
   Serial.begin(115200);
   while (!Serial) continue; // Wait for serial connection to be established
@@ -505,18 +272,39 @@ void setup() {
   can_mcp2515_setup();
   pid_setup();
   shooter_setup();
+
+  motor.attach(PWM_PIN);
+  motor.writeMicroseconds(1000);
+
+  // Set relay pins as outputs
+  pinMode(seedling_gripper_pin, OUTPUT);
+  pinMode(seedling_gripper_lifter_pin, OUTPUT);
+
+  // Initialize relays to LOW (OFF)
+  digitalWrite(seedling_gripper_pin, LOW);
+  digitalWrite(seedling_gripper_lifter_pin, LOW);
+
+  Serial.println("Enter a command:");
+  Serial.println("'A' followed by an angle (0 to 360 degrees) to set motor angle");
+  Serial.println("'D' to stop the motor");
 }
-//---------------------------------------------------------------------------------------------------------------
 
+//-------------------------------------------------Set Motor Angle Function------------------------------------------------------//
+void setMotorAngle(int angle) {
+  int pulseWidth = map(angle, 0, 360, 1080, 1920);
+  motor.writeMicroseconds(pulseWidth);
+  Serial.print("Motor angle set to: ");
+  Serial.println(angle);
+}
 
+//-------------------------------------------------Stop Motor Function-----------------------------------------------------------//
+void stopMotor() {
+  motor.writeMicroseconds(1500); // Set to neutral position (1500 μs)
+}
 
-// ██    ██  ██████  ██ ██████      ██       ██████   ██████  ██████       ██     ██ 
-// ██    ██ ██    ██ ██ ██   ██     ██      ██    ██ ██    ██ ██   ██     ██       ██ 
-// ██    ██ ██    ██ ██ ██   ██     ██      ██    ██ ██    ██ ██████      ██       ██ 
-//  ██  ██  ██    ██ ██ ██   ██     ██      ██    ██ ██    ██ ██          ██       ██ 
-//   ████    ██████  ██ ██████      ███████  ██████   ██████  ██           ██     ██  
+//-------------------------------------------------Main Loop Function------------------------------------------------------------//
 void loop() {
-  ps2x.read_gamepad(false, 1);
+  ps2x.read_gamepad(false, vibrate);
 
   if (ps2x.ButtonPressed(PSB_SELECT)) {
     currentMode = (currentMode == MOVING_MODE) ? SHOOTING_MODE : MOVING_MODE;
@@ -526,8 +314,34 @@ void loop() {
 
   if (currentMode == MOVING_MODE) {
     move_motor(ps2x.Analog(PSS_LX), ps2x.Analog(PSS_LY), ps2x.Analog(PSS_RX));
+    controlRelays();
   } else if (currentMode == SHOOTING_MODE) {
     shooter_loop();
+  }
+
+  if (ps2x.Button(PSB_SQUARE)) { // Pink square button
+    setMotorAngle(90);
+  }
+
+  if (ps2x.Button(PSB_CIRCLE)) { // Red circle button
+    setMotorAngle(0);
+  }
+
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    if (input.startsWith("A")) {
+      int angle = input.substring(1).toInt();
+      if (angle < 0 || angle > 360) {
+        Serial.println("Invalid angle. Please enter an angle between 0 and 360 degrees.");
+        return;
+      }
+      setMotorAngle(angle);
+    } else if (input.equals("D")) {
+      stopMotor();
+      Serial.println("Motor stopped.");
+    } else {
+      Serial.println("Invalid command. Use 'A' followed by angle or 'D' to stop the motor.");
+    }
   }
 
   delay(10);
